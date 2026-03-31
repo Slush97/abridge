@@ -6,6 +6,24 @@ use rmcp::{tool, tool_handler, tool_router, ServerHandler, ServiceExt};
 use rmcp::schemars::{self, JsonSchema};
 use serde::Deserialize;
 
+/// Deserialize a bool that might arrive as a string "true"/"false" from MCP clients.
+fn bool_from_string_or_bool<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<bool, D::Error> {
+    use serde::de;
+
+    struct BoolVisitor;
+    impl<'de> de::Visitor<'de> for BoolVisitor {
+        type Value = bool;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a boolean or string \"true\"/\"false\"")
+        }
+        fn visit_bool<E: de::Error>(self, v: bool) -> std::result::Result<bool, E> { Ok(v) }
+        fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<bool, E> {
+            match v { "true" => Ok(true), "false" => Ok(false), _ => Err(E::custom(format!("expected true/false, got {v}"))) }
+        }
+    }
+    deserializer.deserialize_any(BoolVisitor)
+}
+
 #[derive(Debug, Clone)]
 pub struct AbridgeMcp {
     tool_router: ToolRouter<Self>,
@@ -22,10 +40,10 @@ impl AbridgeMcp {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ScreenshotParams {
     /// Whether to run OCR on the screenshot
-    #[serde(default)]
+    #[serde(default, deserialize_with = "bool_from_string_or_bool")]
     pub ocr: bool,
     /// Whether to include the view hierarchy
-    #[serde(default)]
+    #[serde(default, deserialize_with = "bool_from_string_or_bool")]
     pub hierarchy: bool,
 }
 
@@ -174,13 +192,29 @@ impl AbridgeMcp {
         }
     }
 
-    #[tool(description = "Get the most recent crash report: stacktrace, current activity, recent error logs, and a screenshot.")]
+    #[tool(description = "Get the most recent crash report: stacktrace, current activity, recent error logs, and a screenshot saved to /tmp.")]
     async fn device_crash_report(
         &self,
         Parameters(_params): Parameters<CrashParams>,
     ) -> String {
-        match crate::state::get_crash_report(true) {
-            Ok(result) => serde_json::to_string_pretty(&result).unwrap_or_else(|e| e.to_string()),
+        // Don't include base64 screenshot — save to file to avoid token limits
+        match crate::state::get_crash_report(false) {
+            Ok(mut report) => {
+                // Save screenshot to temp file instead
+                if let Ok(png) = crate::screen::capture_screenshot() {
+                    let path = format!(
+                        "/tmp/abridge_crash_{}.png",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis()
+                    );
+                    if std::fs::write(&path, &png).is_ok() {
+                        report.screenshot_base64 = Some(format!("saved:{path}"));
+                    }
+                }
+                serde_json::to_string_pretty(&report).unwrap_or_else(|e| e.to_string())
+            }
             Err(e) => format!("Error getting crash report: {e}"),
         }
     }
