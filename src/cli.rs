@@ -52,6 +52,10 @@ pub struct ScreenArgs {
     #[arg(long, default_value_t = false)]
     pub hierarchy: bool,
 
+    /// List interactive UI elements with tap coordinates
+    #[arg(long, default_value_t = false)]
+    pub elements: bool,
+
     /// Save screenshot to file instead of stdout
     #[arg(short, long)]
     pub output: Option<String>,

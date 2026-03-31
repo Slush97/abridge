@@ -53,6 +53,9 @@ pub struct ScreenshotParams {
     /// Whether to include the view hierarchy
     #[serde(default, deserialize_with = "bool_from_string_or_bool")]
     pub hierarchy: bool,
+    /// Whether to include parsed interactive UI elements with tap coordinates
+    #[serde(default, deserialize_with = "bool_from_string_or_bool")]
+    pub elements: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -96,7 +99,7 @@ pub struct DeviceInfoParams {}
 #[tool_router]
 impl AbridgeMcp {
     #[tool(
-        description = "Capture a screenshot from the connected Android device. Returns the image, optional OCR text, and optional view hierarchy XML."
+        description = "Capture a screenshot from the connected Android device. Returns the image, optional OCR text, optional view hierarchy XML, and optional parsed interactive UI elements with tap coordinates."
     )]
     async fn device_screenshot(
         &self,
@@ -124,11 +127,32 @@ impl AbridgeMcp {
             }
         }
 
+        // Fetch hierarchy once if either hierarchy or elements is requested
+        let hierarchy_xml = if params.hierarchy || params.elements {
+            match crate::screen::dump_hierarchy() {
+                Ok(xml) => Some(xml),
+                Err(e) => {
+                    contents.push(Content::text(format!("Hierarchy dump failed: {e}")));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // View hierarchy
         if params.hierarchy {
-            match crate::screen::dump_hierarchy() {
-                Ok(xml) => contents.push(Content::text(format!("--- View Hierarchy ---\n{xml}"))),
-                Err(e) => contents.push(Content::text(format!("Hierarchy dump failed: {e}"))),
+            if let Some(ref xml) = hierarchy_xml {
+                contents.push(Content::text(format!("--- View Hierarchy ---\n{xml}")));
+            }
+        }
+
+        // Parsed interactive elements
+        if params.elements {
+            if let Some(ref xml) = hierarchy_xml {
+                let parsed = crate::screen::elements::parse_elements(xml, true);
+                let text = crate::screen::elements::format_elements(&parsed);
+                contents.push(Content::text(format!("--- UI Elements ---\n{text}")));
             }
         }
 

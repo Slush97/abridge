@@ -38,3 +38,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Base64 (for encoding screenshots in MCP responses)
 base64 = "0.22"
+
+# XML parsing (for view hierarchy element extraction)
+roxmltree = "0.20"

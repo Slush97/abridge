@@ -1,3 +1,5 @@
+pub mod elements;
+
 use anyhow::{Context, Result};
 use base64::Engine;
 use serde::Serialize;
@@ -19,6 +21,10 @@ pub struct ScreenCapture {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hierarchy: Option<String>,
 
+    /// Parsed interactive UI elements (compact text format)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elements: Option<String>,
+
     /// Path where screenshot was saved (if --output used)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub saved_to: Option<String>,
@@ -30,8 +36,30 @@ pub fn capture_screenshot() -> Result<Vec<u8>> {
 }
 
 /// Dump the view hierarchy via uiautomator.
+///
+/// Tries `/dev/tty` first (zero-copy, works on most devices). Falls back to
+/// dumping to a temp file and reading it back (required on Android 16+).
 pub fn dump_hierarchy() -> Result<String> {
-    adb::shell_str("uiautomator dump /dev/tty 2>/dev/null").context("Failed to dump view hierarchy")
+    let output = adb::shell_str("uiautomator dump /dev/tty 2>/dev/null")
+        .context("Failed to dump view hierarchy")?;
+
+    // On most devices the XML is written to /dev/tty and captured in output.
+    // On Android 16+ only the status line comes back. Detect by checking for XML.
+    if output.contains("<?xml") {
+        // Strip the trailing status line if present
+        if let Some(end) = output.rfind("</hierarchy>") {
+            Ok(output[..end + "</hierarchy>".len()].to_string())
+        } else {
+            Ok(output)
+        }
+    } else {
+        // Fallback: dump to file, cat it back, clean up
+        let tmp = "/data/local/tmp/adbridge_hierarchy.xml";
+        adb::shell_str(&format!(
+            "uiautomator dump {tmp} >/dev/null 2>&1 && cat {tmp} && rm -f {tmp}"
+        ))
+        .context("Failed to dump view hierarchy via temp file")
+    }
 }
 
 /// Run OCR on a PNG image buffer using leptess.
@@ -58,7 +86,12 @@ pub fn ocr_image(png_data: &[u8]) -> Result<String> {
 
 /// Full screen capture pipeline.
 /// If `include_base64` is false, the screenshot is saved to a temp file instead.
-pub fn capture(ocr: bool, hierarchy: bool, include_base64: bool) -> Result<ScreenCapture> {
+pub fn capture(
+    ocr: bool,
+    hierarchy: bool,
+    elems: bool,
+    include_base64: bool,
+) -> Result<ScreenCapture> {
     let png_data = capture_screenshot()?;
 
     let image_base64 = if include_base64 {
@@ -90,8 +123,17 @@ pub fn capture(ocr: bool, hierarchy: bool, include_base64: bool) -> Result<Scree
         None
     };
 
-    let hierarchy_xml = if hierarchy {
+    // Fetch hierarchy once if either hierarchy or elements is requested
+    let hierarchy_xml = if hierarchy || elems {
         Some(dump_hierarchy()?)
+    } else {
+        None
+    };
+
+    let elements_text = if elems {
+        let xml = hierarchy_xml.as_deref().unwrap_or("");
+        let parsed = elements::parse_elements(xml, true);
+        Some(elements::format_elements(&parsed))
     } else {
         None
     };
@@ -99,7 +141,8 @@ pub fn capture(ocr: bool, hierarchy: bool, include_base64: bool) -> Result<Scree
     Ok(ScreenCapture {
         image_base64,
         ocr_text,
-        hierarchy: hierarchy_xml,
+        hierarchy: if hierarchy { hierarchy_xml } else { None },
+        elements: elements_text,
         saved_to,
     })
 }
@@ -107,7 +150,7 @@ pub fn capture(ocr: bool, hierarchy: bool, include_base64: bool) -> Result<Scree
 /// CLI entry point.
 pub async fn run(args: ScreenArgs) -> Result<()> {
     let include_base64 = args.output.is_none() && args.json;
-    let mut result = capture(args.ocr, args.hierarchy, include_base64)?;
+    let mut result = capture(args.ocr, args.hierarchy, args.elements, include_base64)?;
 
     if let Some(ref path) = args.output {
         // Re-read the already-saved temp file or capture fresh if base64 was used
@@ -135,9 +178,17 @@ pub async fn run(args: ScreenArgs) -> Result<()> {
             println!("--- View Hierarchy ---");
             println!("{xml}");
         }
-        if result.saved_to.is_none() && result.ocr_text.is_none() && result.hierarchy.is_none() {
+        if let Some(ref elems) = result.elements {
+            println!("--- UI Elements ---");
+            println!("{elems}");
+        }
+        if result.saved_to.is_none()
+            && result.ocr_text.is_none()
+            && result.hierarchy.is_none()
+            && result.elements.is_none()
+        {
             println!(
-                "Screenshot captured ({} bytes base64). Use --output to save, --ocr for text, --hierarchy for layout.",
+                "Screenshot captured ({} bytes base64). Use --output to save, --ocr for text, --hierarchy for layout, --elements for interactive elements.",
                 result.image_base64.as_ref().map(|s| s.len()).unwrap_or(0)
             );
         }
