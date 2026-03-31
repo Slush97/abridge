@@ -40,19 +40,22 @@ pub fn ocr_image(png_data: &[u8]) -> Result<String> {
     use leptess::LepTess;
     use std::io::Write;
 
-    let tmp_path = "/tmp/abridge_ocr_tmp.png";
-    let mut file = std::fs::File::create(tmp_path)?;
+    let tmp_path = format!(
+        "/tmp/abridge_ocr_{}.png",
+        std::process::id()
+    );
+    let mut file = std::fs::File::create(&tmp_path)?;
     file.write_all(png_data)?;
     drop(file);
 
     let mut lt = LepTess::new(None, "eng").context(
         "Failed to initialize Tesseract. Is tesseract-ocr and tessdata installed?",
     )?;
-    lt.set_image(tmp_path)
+    lt.set_image(&tmp_path)
         .context("Failed to load image for OCR")?;
 
     let text = lt.get_utf8_text().context("OCR failed")?;
-    std::fs::remove_file(tmp_path).ok();
+    std::fs::remove_file(&tmp_path).ok();
 
     Ok(text)
 }
@@ -108,7 +111,12 @@ pub async fn run(args: ScreenArgs) -> Result<()> {
     let mut result = capture(args.ocr, args.hierarchy, include_base64)?;
 
     if let Some(ref path) = args.output {
-        let png_data = capture_screenshot()?;
+        // Re-read the already-saved temp file or capture fresh if base64 was used
+        let png_data = if let Some(ref tmp) = result.saved_to {
+            std::fs::read(tmp)?
+        } else {
+            capture_screenshot()?
+        };
         std::fs::write(path, &png_data)?;
         result.saved_to = Some(path.clone());
         result.image_base64 = None;

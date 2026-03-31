@@ -26,9 +26,19 @@ fn keycode_for(name: &str) -> Result<u32> {
 
 /// Send text input to the device.
 pub fn input_text(text: &str) -> Result<()> {
-    // Escape special characters for adb shell input
-    let escaped = text.replace(' ', "%s").replace('&', "\\&").replace('<', "\\<").replace('>', "\\>");
-    adb::shell_str(&format!("input text '{escaped}'"))
+    // Escape for `adb shell input text`: spaces become %s, and all
+    // shell metacharacters must be escaped to avoid injection.
+    let escaped: String = text
+        .chars()
+        .map(|c| match c {
+            ' ' => "%s".to_string(),
+            '\'' | '"' | '\\' | '`' | '$' | '!' | '(' | ')' | '&'
+            | '|' | ';' | '<' | '>' | '{' | '}' | '[' | ']' | '#'
+            | '~' | '?' | '*' => format!("\\{c}"),
+            _ => c.to_string(),
+        })
+        .collect();
+    adb::shell_str(&format!("input text {escaped}"))
         .context("Failed to send text input")?;
     Ok(())
 }
@@ -57,10 +67,10 @@ pub fn key(name: &str) -> Result<()> {
 
 /// Push text to device clipboard via a broadcast.
 pub fn set_clipboard(text: &str) -> Result<()> {
-    // Use am broadcast with a clipboard helper, or service call
-    // Simplest cross-version approach: use input via a temp field
+    // Escape single quotes for shell safety
+    let escaped = text.replace('\'', "'\\''");
     adb::shell_str(&format!(
-        "am broadcast -a clipper.set -e text '{text}'"
+        "am broadcast -a clipper.set -e text '{escaped}'"
     ))
     .context(
         "Failed to set clipboard. Consider installing Clipper app or using Android 10+ clipboard API",

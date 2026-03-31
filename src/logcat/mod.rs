@@ -86,13 +86,15 @@ pub fn fetch(app: Option<&str>, tag: Option<&str>, level: &str, lines: u32) -> R
     let level_filter = parse_level_filter(level);
 
     let cmd = if let Some(package) = app {
-        // Get PID for the package
+        // Get PID(s) for the package — pidof can return multiple space-separated PIDs
         let pid_output = adb::shell_str(&format!("pidof {package}"))?;
         let pid = pid_output.trim();
         if pid.is_empty() {
             anyhow::bail!("App {package} is not running");
         }
-        format!("logcat -d -v threadtime --pid={pid} {level_filter} -t {lines}")
+        // Use the first PID (main process). --pid only accepts one value.
+        let main_pid = pid.split_whitespace().next().unwrap_or(pid);
+        format!("logcat -d -v threadtime --pid={main_pid} {level_filter} -t {lines}")
     } else {
         format!("logcat -d -v threadtime {level_filter} -t {lines}")
     };

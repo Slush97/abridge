@@ -19,7 +19,7 @@ pub struct DeviceState {
 pub struct MemoryInfo {
     pub total_ram: String,
     pub free_ram: String,
-    pub used_ram: String,
+    pub available_ram: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -49,15 +49,24 @@ pub fn resumed_activities() -> Result<Vec<String>> {
 /// Get fragment backstack info for the foreground app.
 pub fn fragment_backstack() -> Result<String> {
     let output =
-        adb::shell_str("dumpsys activity top | grep -A 20 'FragmentManager'")?;
+        adb::shell_str("dumpsys activity top | grep -E 'Added Fragments|Back Stack|#[0-9]+:' | head -20")?;
     Ok(output.trim().to_string())
 }
 
 /// Get display/resolution info.
 pub fn display_info() -> Result<String> {
-    let output =
-        adb::shell_str("dumpsys display | grep -E 'mBaseDisplayInfo|DisplayDeviceInfo'")?;
-    Ok(output.trim().to_string())
+    // Use wm size/density for concise output; fall back to dumpsys
+    let size = adb::shell_str("wm size").unwrap_or_default();
+    let density = adb::shell_str("wm density").unwrap_or_default();
+    let result = format!("{} {}", size.trim(), density.trim());
+    if result.trim().is_empty() {
+        let output =
+            adb::shell_str("dumpsys display | grep -E 'mBaseDisplayInfo'")?;
+        // Truncate to first 500 chars to avoid massive responses
+        Ok(output.trim().chars().take(500).collect())
+    } else {
+        Ok(result)
+    }
 }
 
 /// Get memory stats.
@@ -68,7 +77,7 @@ pub fn memory_info() -> Result<MemoryInfo> {
     Ok(MemoryInfo {
         total_ram: lines.first().unwrap_or(&"unknown").trim().to_string(),
         free_ram: lines.get(1).unwrap_or(&"unknown").trim().to_string(),
-        used_ram: lines.get(2).unwrap_or(&"unknown").trim().to_string(),
+        available_ram: lines.get(2).unwrap_or(&"unknown").trim().to_string(),
     })
 }
 
@@ -139,7 +148,7 @@ pub async fn run(args: StateArgs) -> Result<()> {
             println!("\nMemory:");
             println!("  {}", mem.total_ram);
             println!("  {}", mem.free_ram);
-            println!("  {}", mem.used_ram);
+            println!("  {}", mem.available_ram);
         }
     }
 
