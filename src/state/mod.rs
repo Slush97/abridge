@@ -56,8 +56,8 @@ pub fn fragment_backstack() -> Result<String> {
 /// Get display/resolution info.
 pub fn display_info() -> Result<String> {
     // Use wm size/density for concise output; fall back to dumpsys
-    let size = adb::shell_str("wm size").unwrap_or_default();
-    let density = adb::shell_str("wm density").unwrap_or_default();
+    let size = adb::shell_str("wm size").context("Failed to get display size")?;
+    let density = adb::shell_str("wm density").context("Failed to get display density")?;
     let result = format!("{} {}", size.trim(), density.trim());
     if result.trim().is_empty() {
         let output = adb::shell_str("dumpsys display | grep -E 'mBaseDisplayInfo'")?;

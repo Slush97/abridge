@@ -226,13 +226,16 @@ impl AbridgeMcp {
             Ok(mut report) => {
                 // Save screenshot to temp file instead
                 if let Ok(png) = crate::screen::capture_screenshot() {
-                    let path = format!(
-                        "/tmp/adbridge_crash_{}.png",
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis()
-                    );
+                    let path = std::env::temp_dir()
+                        .join(format!(
+                            "adbridge_crash_{}.png",
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        ))
+                        .to_string_lossy()
+                        .to_string();
                     if std::fs::write(&path, &png).is_ok() {
                         report.screenshot_base64 = Some(format!("saved:{path}"));
                     }
@@ -250,6 +253,17 @@ impl ServerHandler for AbridgeMcp {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_instructions("Android Bridge for AI-Assisted Development. Provides device screenshot/OCR, logcat, input control, state inspection, and crash reports.")
     }
+}
+
+/// Start the MCP server on stdio.
+pub async fn serve() -> Result<()> {
+    tracing::info!("Starting adbridge MCP server on stdio");
+
+    let service = AbridgeMcp::new();
+    let server = service.serve(rmcp::transport::stdio()).await?;
+    server.waiting().await?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -315,15 +329,4 @@ mod tests {
         assert!(serde_json::from_str::<T>(r#"{"v": "yes"}"#).is_err());
         assert!(serde_json::from_str::<T>(r#"{"v": "1"}"#).is_err());
     }
-}
-
-/// Start the MCP server on stdio.
-pub async fn serve() -> Result<()> {
-    tracing::info!("Starting adbridge MCP server on stdio");
-
-    let service = AbridgeMcp::new();
-    let server = service.serve(rmcp::transport::stdio()).await?;
-    server.waiting().await?;
-
-    Ok(())
 }

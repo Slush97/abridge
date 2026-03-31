@@ -39,14 +39,15 @@ pub fn ocr_image(png_data: &[u8]) -> Result<String> {
     use leptess::LepTess;
     use std::io::Write;
 
-    let tmp_path = format!("/tmp/adbridge_ocr_{}.png", std::process::id());
-    let mut file = std::fs::File::create(&tmp_path)?;
-    file.write_all(png_data)?;
-    drop(file);
+    let tmp_path = std::env::temp_dir().join(format!("adbridge_ocr_{}.png", std::process::id()));
+    {
+        let mut file = std::fs::File::create(&tmp_path)?;
+        file.write_all(png_data)?;
+    }
 
     let mut lt = LepTess::new(None, "eng")
         .context("Failed to initialize Tesseract. Is tesseract-ocr and tessdata installed?")?;
-    lt.set_image(&tmp_path)
+    lt.set_image(tmp_path.to_str().context("Invalid temp path")?)
         .context("Failed to load image for OCR")?;
 
     let text = lt.get_utf8_text().context("OCR failed")?;
@@ -67,13 +68,16 @@ pub fn capture(ocr: bool, hierarchy: bool, include_base64: bool) -> Result<Scree
     };
 
     let saved_to = if !include_base64 {
-        let path = format!(
-            "/tmp/adbridge_screenshot_{}.png",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-        );
+        let path = std::env::temp_dir()
+            .join(format!(
+                "adbridge_screenshot_{}.png",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+            ))
+            .to_string_lossy()
+            .to_string();
         std::fs::write(&path, &png_data)?;
         Some(path)
     } else {

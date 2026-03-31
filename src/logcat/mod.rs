@@ -39,24 +39,10 @@ fn parse_logcat_line(line: &str) -> Option<LogEntry> {
         return None;
     }
 
-    // Try to parse the standard threadtime format
-    let parts: Vec<&str> = line.splitn(6, char::is_whitespace).collect();
-    if parts.len() < 6 {
-        return Some(LogEntry {
-            timestamp: String::new(),
-            pid: String::new(),
-            tid: String::new(),
-            level: String::new(),
-            tag: String::new(),
-            message: line.to_string(),
-        });
-    }
-
-    // More robust parsing: find level character and tag
-    let rest = line;
-    if let Some(colon_pos) = rest.find(": ") {
-        let prefix = &rest[..colon_pos];
-        let message = rest[colon_pos + 2..].to_string();
+    // Parse threadtime format by finding the ": " separator, then splitting the prefix
+    if let Some(colon_pos) = line.find(": ") {
+        let prefix = &line[..colon_pos];
+        let message = line[colon_pos + 2..].to_string();
 
         let prefix_parts: Vec<&str> = prefix.split_whitespace().collect();
         if prefix_parts.len() >= 5 {
@@ -94,6 +80,9 @@ pub fn fetch(app: Option<&str>, tag: Option<&str>, level: &str, lines: u32) -> R
         }
         // Use the first PID (main process). --pid only accepts one value.
         let main_pid = pid.split_whitespace().next().unwrap_or(pid);
+        if !main_pid.bytes().all(|b| b.is_ascii_digit()) {
+            anyhow::bail!("Unexpected PID format from device: {main_pid}");
+        }
         format!("logcat -d -v threadtime --pid={main_pid} {level_filter} -t {lines}")
     } else {
         format!("logcat -d -v threadtime {level_filter} -t {lines}")
