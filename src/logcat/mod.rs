@@ -86,7 +86,7 @@ pub fn fetch(app: Option<&str>, tag: Option<&str>, level: &str, lines: u32) -> R
     let level_filter = parse_level_filter(level);
 
     let cmd = if let Some(package) = app {
-        // Get PID(s) for the package — pidof can return multiple space-separated PIDs
+        // Get PID(s) for the package. pidof can return multiple space-separated PIDs
         let pid_output = adb::shell_str(&format!("pidof {package}"))?;
         let pid = pid_output.trim();
         if pid.is_empty() {

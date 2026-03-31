@@ -2,7 +2,7 @@
 name = "abridge"
 version = "0.1.0"
 edition = "2021"
-description = "Android Bridge for AI-Assisted Development — CLI + MCP server"
+description = "Android Bridge for AI-Assisted Development: CLI + MCP server"
 license = "MIT"
 
 [dependencies]

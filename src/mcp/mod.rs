@@ -221,7 +221,7 @@ impl AbridgeMcp {
         description = "Get the most recent crash report: stacktrace, current activity, recent error logs, and a screenshot saved to /tmp."
     )]
     async fn device_crash_report(&self, Parameters(_params): Parameters<CrashParams>) -> String {
-        // Don't include base64 screenshot — save to file to avoid token limits
+        // Don't include base64 screenshot; save to file to avoid token limits
         match crate::state::get_crash_report(false) {
             Ok(mut report) => {
                 // Save screenshot to temp file instead
