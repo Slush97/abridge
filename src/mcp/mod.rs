@@ -115,20 +115,47 @@ impl AbridgeMcp {
 
         let mut contents = Vec::new();
 
-        // Return image as an MCP image content block
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
-        contents.push(Content::image(b64, "image/png"));
+        // Compress to JPEG at 720px width for lower token usage
+        let image_data =
+            crate::screen::compress_screenshot(&png_data, 720, 80).unwrap_or_else(|_| {
+                // Fall back to original PNG if compression fails
+                png_data.clone()
+            });
+        let (mime, b64) = if image_data.starts_with(b"\xff\xd8") {
+            (
+                "image/jpeg",
+                base64::engine::general_purpose::STANDARD.encode(&image_data),
+            )
+        } else {
+            (
+                "image/png",
+                base64::engine::general_purpose::STANDARD.encode(&image_data),
+            )
+        };
+        contents.push(Content::image(b64, mime));
 
-        // OCR text
+        // OCR text (cleaned to remove noise lines)
         if params.ocr {
             match crate::screen::ocr_image(&png_data) {
-                Ok(text) => contents.push(Content::text(format!("--- OCR Text ---\n{text}"))),
+                Ok(text) => {
+                    let cleaned = crate::screen::clean_ocr_text(&text);
+                    if !cleaned.is_empty() {
+                        contents.push(Content::text(format!("--- OCR Text ---\n{cleaned}")));
+                    } else {
+                        contents.push(Content::text(
+                            "--- OCR Text ---\n(no readable text detected)".to_string(),
+                        ));
+                    }
+                }
                 Err(e) => contents.push(Content::text(format!("OCR failed: {e}"))),
             }
         }
 
-        // Fetch hierarchy once if either hierarchy or elements is requested
-        let hierarchy_xml = if params.hierarchy || params.elements {
+        // Auto-include elements when no structural flags are set
+        let include_elements = params.elements || !params.hierarchy;
+
+        // Fetch hierarchy once if hierarchy, elements, or auto-elements is needed
+        let hierarchy_xml = if params.hierarchy || include_elements {
             match crate::screen::dump_hierarchy() {
                 Ok(xml) => Some(xml),
                 Err(e) => {
@@ -140,15 +167,16 @@ impl AbridgeMcp {
             None
         };
 
-        // View hierarchy
+        // View hierarchy (stripped of default/false attributes)
         if params.hierarchy {
             if let Some(ref xml) = hierarchy_xml {
-                contents.push(Content::text(format!("--- View Hierarchy ---\n{xml}")));
+                let stripped = crate::screen::strip_hierarchy(xml);
+                contents.push(Content::text(format!("--- View Hierarchy ---\n{stripped}")));
             }
         }
 
         // Parsed interactive elements
-        if params.elements {
+        if include_elements {
             if let Some(ref xml) = hierarchy_xml {
                 let parsed = crate::screen::elements::parse_elements(xml, true);
                 let text = crate::screen::elements::format_elements(&parsed);

@@ -62,6 +62,133 @@ pub fn dump_hierarchy() -> Result<String> {
     }
 }
 
+/// Compress a PNG screenshot to JPEG at reduced resolution for lower token usage.
+pub fn compress_screenshot(png_data: &[u8], max_width: u32, quality: u8) -> Result<Vec<u8>> {
+    let img = image::load_from_memory(png_data).context("Failed to decode screenshot")?;
+
+    let img = if img.width() > max_width {
+        let scale = max_width as f64 / img.width() as f64;
+        let new_height = (img.height() as f64 * scale) as u32;
+        img.resize(max_width, new_height, image::imageops::FilterType::Triangle)
+    } else {
+        img
+    };
+
+    let mut buf = Vec::new();
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
+    img.write_with_encoder(encoder)
+        .context("Failed to encode JPEG")?;
+    Ok(buf)
+}
+
+/// Strip default/false attributes from uiautomator hierarchy XML to reduce size.
+pub fn strip_hierarchy(xml: &str) -> String {
+    let doc = match roxmltree::Document::parse(xml) {
+        Ok(d) => d,
+        Err(_) => return xml.to_string(),
+    };
+
+    let mut out = String::with_capacity(xml.len() / 2);
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    write_element(&doc.root_element(), &mut out, 0);
+    out
+}
+
+fn write_element(node: &roxmltree::Node, out: &mut String, depth: usize) {
+    let indent = "  ".repeat(depth);
+    out.push_str(&indent);
+    out.push('<');
+    out.push_str(node.tag_name().name());
+
+    for attr in node.attributes() {
+        // Only strip attributes on <node> elements; keep all attrs on <hierarchy> etc.
+        if node.tag_name().name() != "node" || should_keep_attr(attr.name(), attr.value()) {
+            out.push(' ');
+            out.push_str(attr.name());
+            out.push_str("=\"");
+            out.push_str(&escape_xml_attr(attr.value()));
+            out.push('"');
+        }
+    }
+
+    let children: Vec<_> = node.children().filter(|c| c.is_element()).collect();
+    if children.is_empty() {
+        out.push_str(" />\n");
+    } else {
+        out.push_str(">\n");
+        for child in &children {
+            write_element(child, out, depth + 1);
+        }
+        out.push_str(&indent);
+        out.push_str("</");
+        out.push_str(node.tag_name().name());
+        out.push_str(">\n");
+    }
+}
+
+/// Whether a uiautomator `<node>` attribute should be kept in stripped output.
+fn should_keep_attr(name: &str, value: &str) -> bool {
+    // Skip empty string attributes (text="", content-desc="", resource-id="", hint="")
+    if value.is_empty() {
+        return false;
+    }
+
+    // Boolean attributes that default to "false" -- skip when at default
+    const FALSE_BY_DEFAULT: &[&str] = &[
+        "checkable",
+        "checked",
+        "clickable",
+        "focusable",
+        "focused",
+        "scrollable",
+        "long-clickable",
+        "password",
+        "selected",
+    ];
+    if FALSE_BY_DEFAULT.contains(&name) && value == "false" {
+        return false;
+    }
+
+    // enabled defaults to "true" -- skip when at default
+    if name == "enabled" && value == "true" {
+        return false;
+    }
+
+    // index is noise for structural understanding
+    if name == "index" {
+        return false;
+    }
+
+    true
+}
+
+fn escape_xml_attr(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Clean OCR output by removing lines that are mostly non-alphanumeric noise.
+pub fn clean_ocr_text(text: &str) -> String {
+    text.lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                return false;
+            }
+            let alnum = trimmed
+                .chars()
+                .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+                .count();
+            let total = trimmed.chars().count();
+            // Keep lines where at least 40% of characters are alphanumeric or whitespace
+            alnum * 100 / total.max(1) >= 40
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Run OCR on a PNG image buffer using leptess.
 pub fn ocr_image(png_data: &[u8]) -> Result<String> {
     use leptess::LepTess;
@@ -195,4 +322,133 @@ pub async fn run(args: ScreenArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE_HIERARCHY: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy rotation="0">
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout"
+        package="com.example" content-desc="" checkable="false" checked="false"
+        clickable="false" enabled="true" focusable="false" focused="false"
+        scrollable="false" long-clickable="false" password="false" selected="false"
+        bounds="[0,0][1080,2340]">
+    <node index="0" text="Login" resource-id="com.example:id/login_btn"
+          class="android.widget.Button" package="com.example" content-desc="Log in"
+          checkable="false" checked="false" clickable="true" enabled="true"
+          focusable="true" focused="false" scrollable="false" long-clickable="false"
+          password="false" selected="false" bounds="[200,700][880,800]" />
+    <node index="1" text="" resource-id="com.example:id/password"
+          class="android.widget.EditText" package="com.example" content-desc=""
+          checkable="false" checked="false" clickable="true" enabled="false"
+          focusable="true" focused="true" scrollable="false" long-clickable="false"
+          password="true" selected="false" bounds="[100,550][980,650]" />
+  </node>
+</hierarchy>"#;
+
+    #[test]
+    fn strip_hierarchy_removes_default_attrs() {
+        let stripped = strip_hierarchy(SAMPLE_HIERARCHY);
+
+        // Default-false booleans should be gone
+        assert!(!stripped.contains("checkable=\"false\""));
+        assert!(!stripped.contains("checked=\"false\""));
+        assert!(!stripped.contains("selected=\"false\""));
+        assert!(!stripped.contains("scrollable=\"false\""));
+        assert!(!stripped.contains("long-clickable=\"false\""));
+
+        // enabled="true" (default) should be gone
+        assert!(!stripped.contains("enabled=\"true\""));
+
+        // Empty attributes should be gone
+        assert!(!stripped.contains("content-desc=\"\""));
+        assert!(!stripped.contains("text=\"\""));
+        assert!(!stripped.contains("resource-id=\"\""));
+
+        // index should be gone
+        assert!(!stripped.contains("index="));
+    }
+
+    #[test]
+    fn strip_hierarchy_keeps_non_default_attrs() {
+        let stripped = strip_hierarchy(SAMPLE_HIERARCHY);
+
+        // Non-default booleans should remain
+        assert!(stripped.contains("clickable=\"true\""));
+        assert!(stripped.contains("focusable=\"true\""));
+        assert!(stripped.contains("focused=\"true\""));
+        assert!(stripped.contains("password=\"true\""));
+        assert!(stripped.contains("enabled=\"false\""));
+
+        // Non-empty text attributes
+        assert!(stripped.contains("text=\"Login\""));
+        assert!(stripped.contains("content-desc=\"Log in\""));
+        assert!(stripped.contains("resource-id=\"com.example:id/login_btn\""));
+        assert!(stripped.contains("class=\"android.widget.Button\""));
+        assert!(stripped.contains("bounds=\"[200,700][880,800]\""));
+
+        // Hierarchy root attrs preserved
+        assert!(stripped.contains("rotation=\"0\""));
+    }
+
+    #[test]
+    fn strip_hierarchy_is_smaller() {
+        let stripped = strip_hierarchy(SAMPLE_HIERARCHY);
+        assert!(
+            stripped.len() < SAMPLE_HIERARCHY.len(),
+            "stripped ({}) should be smaller than original ({})",
+            stripped.len(),
+            SAMPLE_HIERARCHY.len()
+        );
+    }
+
+    #[test]
+    fn strip_hierarchy_preserves_structure() {
+        let stripped = strip_hierarchy(SAMPLE_HIERARCHY);
+        // Should still be parseable XML
+        assert!(stripped.contains("<hierarchy"));
+        assert!(stripped.contains("</hierarchy>"));
+        assert!(stripped.contains("<node"));
+        // Verify nesting: parent node should contain children
+        assert!(stripped.contains("</node>"));
+    }
+
+    #[test]
+    fn strip_hierarchy_invalid_xml_passthrough() {
+        let bad = "not xml at all";
+        assert_eq!(strip_hierarchy(bad), bad);
+    }
+
+    #[test]
+    fn clean_ocr_removes_noise() {
+        let input = "Hello World\n!@#$%^&*()\n<>{}[]|\\~`\nGood text here\n...---...\n";
+        let cleaned = clean_ocr_text(input);
+        assert!(cleaned.contains("Hello World"));
+        assert!(cleaned.contains("Good text here"));
+        assert!(!cleaned.contains("!@#$%^&*()"));
+        assert!(!cleaned.contains("<>{}[]|\\~`"));
+    }
+
+    #[test]
+    fn clean_ocr_keeps_normal_text() {
+        let input = "Settings\nWi-Fi\nBluetooth\nVersion 1.2.3";
+        let cleaned = clean_ocr_text(input);
+        assert!(cleaned.contains("Settings"));
+        assert!(cleaned.contains("Wi-Fi"));
+        assert!(cleaned.contains("Version 1.2.3"));
+    }
+
+    #[test]
+    fn clean_ocr_empty_returns_empty() {
+        assert!(clean_ocr_text("").is_empty());
+        assert!(clean_ocr_text("   \n  \n   ").is_empty());
+    }
+
+    #[test]
+    fn clean_ocr_all_noise_returns_empty() {
+        let noise = "~!@#\n$%^&\n***\n|||";
+        assert!(clean_ocr_text(noise).is_empty());
+    }
 }

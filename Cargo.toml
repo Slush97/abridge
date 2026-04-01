@@ -41,3 +41,6 @@ base64 = "0.22"
 
 # XML parsing (for view hierarchy element extraction)
 roxmltree = "0.20"
+
+# Image processing (screenshot compression/downscaling)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
