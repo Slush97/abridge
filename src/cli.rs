@@ -143,10 +143,6 @@ pub struct StateArgs {
 
 #[derive(clap::Args)]
 pub struct CrashArgs {
-    /// Path to source root for mapping stacktrace to code
-    #[arg(long)]
-    pub source: Option<String>,
-
     /// Output as JSON
     #[arg(long, default_value_t = false)]
     pub json: bool,

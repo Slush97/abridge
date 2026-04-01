@@ -65,16 +65,22 @@ pub fn key(name: &str) -> Result<()> {
 }
 
 /// Push text to device clipboard via a broadcast.
-pub fn set_clipboard(text: &str) -> Result<()> {
-    // Escape single quotes for shell safety
+///
+/// Returns a status message indicating whether the broadcast was received.
+/// Requires the Clipper app (available on F-Droid) for reliable operation.
+pub fn set_clipboard(text: &str) -> Result<String> {
     let escaped = text.replace('\'', "'\\''");
-    adb::shell_str(&format!(
-        "am broadcast -a clipper.set -e text '{escaped}'"
-    ))
-    .context(
-        "Failed to set clipboard. Consider installing Clipper app or using Android 10+ clipboard API",
-    )?;
-    Ok(())
+    let output = adb::shell_str(&format!("am broadcast -a clipper.set -e text '{escaped}'"))
+        .context("Failed to send clipboard broadcast")?;
+
+    if output.contains("result=-1") || output.contains("data=") {
+        Ok("Clipboard set".to_string())
+    } else {
+        Ok("Clipboard broadcast sent but no receiver confirmed it. \
+             Install the Clipper app (F-Droid) for reliable clipboard support, \
+             or use 'text' input type to type directly."
+            .to_string())
+    }
 }
 
 /// CLI entry point.
@@ -103,8 +109,8 @@ pub async fn run(args: InputArgs) -> Result<()> {
             println!("Sent key: {name}");
         }
         InputAction::Clip { text } => {
-            set_clipboard(&text)?;
-            println!("Clipboard set");
+            let msg = set_clipboard(&text)?;
+            println!("{msg}");
         }
     }
 

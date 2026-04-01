@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use base64::Engine;
 use serde::Serialize;
 
 use crate::adb;
@@ -28,7 +27,7 @@ pub struct CrashReport {
     pub current_activity: String,
     pub recent_logcat: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub screenshot_base64: Option<String>,
+    pub screenshot_path: Option<String>,
 }
 
 /// Get the currently focused activity.
@@ -107,9 +106,23 @@ pub fn get_crash_report(include_screenshot: bool) -> Result<CrashReport> {
     let recent = adb::shell_str("logcat -d -t 30 *:E").unwrap_or_default();
     let recent_logcat: Vec<String> = recent.lines().map(|l| l.to_string()).collect();
 
-    let screenshot_base64 = if include_screenshot {
+    let screenshot_path = if include_screenshot {
         if let Ok(png) = crate::screen::capture_screenshot() {
-            Some(base64::engine::general_purpose::STANDARD.encode(&png))
+            let path = std::env::temp_dir()
+                .join(format!(
+                    "adbridge_crash_{}.png",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                ))
+                .to_string_lossy()
+                .to_string();
+            if std::fs::write(&path, &png).is_ok() {
+                Some(path)
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -121,7 +134,7 @@ pub fn get_crash_report(include_screenshot: bool) -> Result<CrashReport> {
         stacktrace,
         current_activity: activity,
         recent_logcat,
-        screenshot_base64,
+        screenshot_path,
     })
 }
 
@@ -169,8 +182,8 @@ pub async fn crash(args: CrashArgs) -> Result<()> {
         for line in &report.recent_logcat {
             println!("  {line}");
         }
-        if report.screenshot_base64.is_some() {
-            println!("\n[Screenshot captured]");
+        if let Some(ref path) = report.screenshot_path {
+            println!("\nScreenshot saved to {path}");
         }
     }
 

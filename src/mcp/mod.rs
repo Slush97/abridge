@@ -32,6 +32,20 @@ fn bool_from_string_or_bool<'de, D: serde::Deserializer<'de>>(
     deserializer.deserialize_any(BoolVisitor)
 }
 
+/// Convert an error into an MCP internal error response.
+fn mcp_err(e: impl std::fmt::Display) -> rmcp::ErrorData {
+    rmcp::ErrorData::new(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string(), None)
+}
+
+/// Create an MCP invalid-params error response.
+fn mcp_invalid(msg: &str) -> rmcp::ErrorData {
+    rmcp::ErrorData::new(
+        rmcp::model::ErrorCode::INVALID_PARAMS,
+        msg.to_string(),
+        None,
+    )
+}
+
 #[derive(Debug, Clone)]
 pub struct AbridgeMcp {
     tool_router: ToolRouter<Self>,
@@ -105,13 +119,8 @@ impl AbridgeMcp {
         &self,
         Parameters(params): Parameters<ScreenshotParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let png_data = crate::screen::capture_screenshot().map_err(|e| {
-            rmcp::ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                format!("Screenshot failed: {e}"),
-                None,
-            )
-        })?;
+        let png_data = crate::screen::capture_screenshot()
+            .map_err(|e| crate::mcp::mcp_err(format!("Screenshot failed: {e}")))?;
 
         let mut contents = Vec::new();
 
@@ -190,45 +199,54 @@ impl AbridgeMcp {
     #[tool(
         description = "Get filtered logcat entries from the connected Android device. Can filter by app, tag, and log level."
     )]
-    async fn device_logcat(&self, Parameters(params): Parameters<LogcatParams>) -> String {
-        match crate::logcat::fetch(
+    async fn device_logcat(
+        &self,
+        Parameters(params): Parameters<LogcatParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::logcat::fetch(
             params.app.as_deref(),
             params.tag.as_deref(),
             &params.level,
             params.lines,
-        ) {
-            Ok(result) => serde_json::to_string_pretty(&result).unwrap_or_else(|e| e.to_string()),
-            Err(e) => format!("Error reading logcat: {e}"),
-        }
+        )
+        .map_err(crate::mcp::mcp_err)?;
+
+        let json = serde_json::to_string_pretty(&result).map_err(crate::mcp::mcp_err)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
     #[tool(
         description = "Get current device state: focused activity, fragment backstack, display info, and memory stats."
     )]
-    async fn device_state(&self) -> String {
-        match crate::state::get_state(true) {
-            Ok(result) => serde_json::to_string_pretty(&result).unwrap_or_else(|e| e.to_string()),
-            Err(e) => format!("Error getting device state: {e}"),
-        }
+    async fn device_state(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::state::get_state(true).map_err(crate::mcp::mcp_err)?;
+        let json = serde_json::to_string_pretty(&result).map_err(crate::mcp::mcp_err)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
     #[tool(
         description = "Send input to the Android device. Types: 'text' (type text), 'tap' (value='x,y'), 'swipe' (value='x1,y1,x2,y2'), 'key' (value=home/back/enter/menu), 'clip' (set clipboard)."
     )]
-    async fn device_input(&self, Parameters(params): Parameters<InputParams>) -> String {
-        let result = match params.r#type.as_str() {
-            "text" => crate::input::input_text(&params.value),
+    async fn device_input(
+        &self,
+        Parameters(params): Parameters<InputParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let message = match params.r#type.as_str() {
+            "text" => {
+                crate::input::input_text(&params.value).map_err(crate::mcp::mcp_err)?;
+                format!("OK: text '{}'", params.value)
+            }
             "tap" => {
                 let coords: Vec<u32> = params
                     .value
                     .split(',')
                     .filter_map(|s| s.trim().parse().ok())
                     .collect();
-                if coords.len() == 2 {
-                    crate::input::tap(coords[0], coords[1])
-                } else {
-                    return "Error: tap value must be 'x,y'".to_string();
+                if coords.len() != 2 {
+                    return Err(crate::mcp::mcp_invalid("tap value must be 'x,y'"));
                 }
+                crate::input::tap(coords[0], coords[1]).map_err(crate::mcp::mcp_err)?;
+                format!("OK: tap '{}'", params.value)
             }
             "swipe" => {
                 let coords: Vec<u32> = params
@@ -236,66 +254,56 @@ impl AbridgeMcp {
                     .split(',')
                     .filter_map(|s| s.trim().parse().ok())
                     .collect();
-                if coords.len() == 4 {
-                    crate::input::swipe(
-                        coords[0],
-                        coords[1],
-                        coords[2],
-                        coords[3],
-                        params.duration.unwrap_or(300),
-                    )
-                } else {
-                    return "Error: swipe value must be 'x1,y1,x2,y2'".to_string();
+                if coords.len() != 4 {
+                    return Err(crate::mcp::mcp_invalid("swipe value must be 'x1,y1,x2,y2'"));
                 }
+                crate::input::swipe(
+                    coords[0],
+                    coords[1],
+                    coords[2],
+                    coords[3],
+                    params.duration.unwrap_or(300),
+                )
+                .map_err(crate::mcp::mcp_err)?;
+                format!("OK: swipe '{}'", params.value)
             }
-            "key" => crate::input::key(&params.value),
-            "clip" => crate::input::set_clipboard(&params.value),
-            other => return format!("Unknown input type: {other}"),
+            "key" => {
+                crate::input::key(&params.value).map_err(crate::mcp::mcp_err)?;
+                format!("OK: key '{}'", params.value)
+            }
+            "clip" => crate::input::set_clipboard(&params.value).map_err(crate::mcp::mcp_err)?,
+            other => {
+                return Err(crate::mcp::mcp_invalid(&format!(
+                    "Unknown input type: {other}"
+                )))
+            }
         };
 
-        match result {
-            Ok(()) => format!("OK: {} '{}'", params.r#type, params.value),
-            Err(e) => format!("Error: {e}"),
-        }
+        Ok(CallToolResult::success(vec![Content::text(message)]))
     }
 
     #[tool(
         description = "List connected Android devices with model, Android version, and SDK version."
     )]
-    async fn device_info(&self, Parameters(_params): Parameters<DeviceInfoParams>) -> String {
-        match crate::adb::connection::list_devices() {
-            Ok(devices) => serde_json::to_string_pretty(&devices).unwrap_or_else(|e| e.to_string()),
-            Err(e) => format!("Error listing devices: {e}"),
-        }
+    async fn device_info(
+        &self,
+        Parameters(_params): Parameters<DeviceInfoParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let devices = crate::adb::connection::list_devices().map_err(crate::mcp::mcp_err)?;
+        let json = serde_json::to_string_pretty(&devices).map_err(crate::mcp::mcp_err)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
     #[tool(
         description = "Get the most recent crash report: stacktrace, current activity, recent error logs, and a screenshot saved to /tmp."
     )]
-    async fn device_crash_report(&self, Parameters(_params): Parameters<CrashParams>) -> String {
-        // Don't include base64 screenshot; save to file to avoid token limits
-        match crate::state::get_crash_report(false) {
-            Ok(mut report) => {
-                // Save screenshot to temp file instead
-                if let Ok(png) = crate::screen::capture_screenshot() {
-                    let path = std::env::temp_dir()
-                        .join(format!(
-                            "adbridge_crash_{}.png",
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis()
-                        ))
-                        .to_string_lossy()
-                        .to_string();
-                    if std::fs::write(&path, &png).is_ok() {
-                        report.screenshot_base64 = Some(format!("saved:{path}"));
-                    }
-                }
-                serde_json::to_string_pretty(&report).unwrap_or_else(|e| e.to_string())
-            }
-            Err(e) => format!("Error getting crash report: {e}"),
-        }
+    async fn device_crash_report(
+        &self,
+        Parameters(_params): Parameters<CrashParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let report = crate::state::get_crash_report(true).map_err(crate::mcp::mcp_err)?;
+        let json = serde_json::to_string_pretty(&report).map_err(crate::mcp::mcp_err)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 }
 
