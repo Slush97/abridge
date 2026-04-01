@@ -25,7 +25,7 @@ static TARGET_DEVICE: Mutex<Option<String>> = Mutex::new(None);
 /// adbridge::adb::set_target_device(None);
 /// ```
 pub fn set_target_device(device: Option<String>) {
-    *TARGET_DEVICE.lock().expect("TARGET_DEVICE mutex poisoned") = device;
+    *TARGET_DEVICE.lock().unwrap_or_else(|e| e.into_inner()) = device;
 }
 
 /// Get a connected ADB server instance (connects to local adb server on default port).
@@ -38,7 +38,7 @@ pub fn server() -> Result<ADBServer> {
 fn get_target_device(server: &mut ADBServer) -> Result<adb_client::server_device::ADBServerDevice> {
     let serial = TARGET_DEVICE
         .lock()
-        .expect("TARGET_DEVICE mutex poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .clone();
     match serial {
         Some(ref s) => server.get_device_by_name(s).with_context(|| {
@@ -92,5 +92,26 @@ pub fn shell(command: &str) -> Result<Vec<u8>> {
 /// ```
 pub fn shell_str(command: &str) -> Result<String> {
     let output = shell(command)?;
+    Ok(String::from_utf8_lossy(&output).to_string())
+}
+
+/// Execute a shell command on a specific device by serial and return stdout as bytes.
+pub fn shell_on(serial: &str, command: &str) -> Result<Vec<u8>> {
+    let mut server = server()?;
+    let mut device = server.get_device_by_name(serial).with_context(|| {
+        format!("Device '{serial}' not found. Check serial with `adbridge devices`.")
+    })?;
+
+    let mut output = Vec::new();
+    device
+        .shell_command(&command, Some(&mut output), None)
+        .context("Failed to execute shell command on device")?;
+
+    Ok(output)
+}
+
+/// Execute a shell command on a specific device by serial and return output as a UTF-8 string.
+pub fn shell_str_on(serial: &str, command: &str) -> Result<String> {
+    let output = shell_on(serial, command)?;
     Ok(String::from_utf8_lossy(&output).to_string())
 }

@@ -310,7 +310,14 @@ pub fn ocr_image(png_data: &[u8]) -> Result<String> {
     use leptess::LepTess;
     use std::io::Write;
 
-    let tmp_path = std::env::temp_dir().join(format!("adbridge_ocr_{}.png", std::process::id()));
+    let tmp_path = std::env::temp_dir().join(format!(
+        "adbridge_ocr_{}_{}.png",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
     {
         let mut file = std::fs::File::create(&tmp_path)?;
         file.write_all(png_data)?;

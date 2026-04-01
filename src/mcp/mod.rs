@@ -75,8 +75,8 @@ pub struct ScreenshotParams {
     /// Whether to include the view hierarchy
     #[serde(default, deserialize_with = "bool_from_string_or_bool")]
     pub hierarchy: bool,
-    /// Whether to include parsed interactive UI elements with tap coordinates
-    #[serde(default, deserialize_with = "bool_from_string_or_bool")]
+    /// Whether to include parsed interactive UI elements with tap coordinates (default: true)
+    #[serde(default = "default_true", deserialize_with = "bool_from_string_or_bool")]
     pub elements: bool,
     /// Return full-resolution PNG instead of compressed JPEG (default: false)
     #[serde(default, deserialize_with = "bool_from_string_or_bool")]
@@ -97,6 +97,10 @@ pub struct LogcatParams {
     /// Number of recent lines
     #[serde(default = "default_lines")]
     pub lines: u32,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_level() -> String {
@@ -186,11 +190,8 @@ impl AbridgeMcp {
             }
         }
 
-        // Auto-include elements when no structural flags are set
-        let include_elements = params.elements || !params.hierarchy;
-
-        // Fetch hierarchy once if hierarchy, elements, or auto-elements is needed
-        let hierarchy_xml = if params.hierarchy || include_elements {
+        // Fetch hierarchy once if hierarchy or elements is needed
+        let hierarchy_xml = if params.hierarchy || params.elements {
             match crate::screen::dump_hierarchy() {
                 Ok(xml) => Some(xml),
                 Err(e) => {
@@ -211,7 +212,7 @@ impl AbridgeMcp {
         }
 
         // Parsed interactive elements
-        if include_elements {
+        if params.elements {
             if let Some(ref xml) = hierarchy_xml {
                 let parsed = crate::screen::elements::parse_elements(xml, true);
                 let text = crate::screen::elements::format_elements(&parsed);

@@ -42,15 +42,15 @@ pub fn list_devices() -> Result<Vec<DeviceInfo>> {
         });
     }
 
-    // Enrich with props from each device
+    // Enrich with props from each device (queried by serial)
     for info in &mut infos {
-        if let Ok(model) = super::shell_str("getprop ro.product.model") {
+        if let Ok(model) = super::shell_str_on(&info.serial, "getprop ro.product.model") {
             info.model = model.trim().to_string();
         }
-        if let Ok(ver) = super::shell_str("getprop ro.build.version.release") {
+        if let Ok(ver) = super::shell_str_on(&info.serial, "getprop ro.build.version.release") {
             info.android_version = ver.trim().to_string();
         }
-        if let Ok(sdk) = super::shell_str("getprop ro.build.version.sdk") {
+        if let Ok(sdk) = super::shell_str_on(&info.serial, "getprop ro.build.version.sdk") {
             info.sdk_version = sdk.trim().to_string();
         }
     }

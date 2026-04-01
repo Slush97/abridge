@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! # adbridge
 //!
 //! Android Bridge for AI-Assisted Development.

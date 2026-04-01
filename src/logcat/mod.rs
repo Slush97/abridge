@@ -91,6 +91,13 @@ pub fn fetch(app: Option<&str>, tag: Option<&str>, level: &str, lines: u32) -> R
     let level_filter = parse_level_filter(level);
 
     let cmd = if let Some(package) = app {
+        // Validate package name to prevent shell injection
+        if !package
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_')
+        {
+            anyhow::bail!("Invalid package name: {package}");
+        }
         // Get PID(s) for the package. pidof can return multiple space-separated PIDs
         let pid_output = adb::shell_str(&format!("pidof {package}"))?;
         let pid = pid_output.trim();
@@ -238,6 +245,15 @@ mod tests {
         assert_eq!(entry.level, "E");
         assert_eq!(entry.tag, "CrashTag");
         assert_eq!(entry.message, "NullPointerException");
+    }
+
+    #[test]
+    fn reject_invalid_package_names() {
+        // These would be shell injection attempts
+        assert!(fetch(Some("; rm -rf /"), None, "info", 10).is_err());
+        assert!(fetch(Some("com.app && echo pwned"), None, "info", 10).is_err());
+        assert!(fetch(Some("$(whoami)"), None, "info", 10).is_err());
+        assert!(fetch(Some("app|cat /etc/passwd"), None, "info", 10).is_err());
     }
 
     #[test]

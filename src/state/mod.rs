@@ -69,13 +69,21 @@ pub fn display_info() -> Result<String> {
 
 /// Get memory stats.
 pub fn memory_info() -> Result<MemoryInfo> {
-    let output = adb::shell_str("cat /proc/meminfo | head -3")?;
-    let lines: Vec<&str> = output.lines().collect();
+    let output = adb::shell_str("cat /proc/meminfo")?;
+
+    let find_key = |key: &str| -> String {
+        output
+            .lines()
+            .find(|l| l.starts_with(key))
+            .unwrap_or("unknown")
+            .trim()
+            .to_string()
+    };
 
     Ok(MemoryInfo {
-        total_ram: lines.first().unwrap_or(&"unknown").trim().to_string(),
-        free_ram: lines.get(1).unwrap_or(&"unknown").trim().to_string(),
-        available_ram: lines.get(2).unwrap_or(&"unknown").trim().to_string(),
+        total_ram: find_key("MemTotal:"),
+        free_ram: find_key("MemFree:"),
+        available_ram: find_key("MemAvailable:"),
     })
 }
 
