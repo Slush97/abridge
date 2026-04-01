@@ -7,6 +7,10 @@ use clap::{Parser, Subcommand};
     version
 )]
 pub struct Cli {
+    /// Target device serial number (uses first connected device if omitted)
+    #[arg(long, global = true)]
+    pub device: Option<String>,
+
     #[command(subcommand)]
     pub command: Command,
 }

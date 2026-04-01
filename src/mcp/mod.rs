@@ -61,6 +61,8 @@ impl AbridgeMcp {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ScreenshotParams {
+    /// Target device serial (uses first connected device if omitted)
+    pub device: Option<String>,
     /// Whether to run OCR on the screenshot
     #[serde(default, deserialize_with = "bool_from_string_or_bool")]
     pub ocr: bool,
@@ -77,6 +79,8 @@ pub struct ScreenshotParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct LogcatParams {
+    /// Target device serial (uses first connected device if omitted)
+    pub device: Option<String>,
     /// Filter by app package name
     pub app: Option<String>,
     /// Filter by log tag
@@ -99,6 +103,8 @@ fn default_lines() -> u32 {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct InputParams {
+    /// Target device serial (uses first connected device if omitted)
+    pub device: Option<String>,
     /// Input type: "text", "tap", "swipe", "key", "clip"
     pub r#type: String,
     /// The value: text content, key name, or coordinates as "x,y" or "x1,y1,x2,y2"
@@ -109,12 +115,23 @@ pub struct InputParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ShellParams {
+    /// Target device serial (uses first connected device if omitted)
+    pub device: Option<String>,
     /// Shell command to execute on the device (e.g., "getprop ro.build.fingerprint")
     pub command: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct CrashParams {}
+pub struct CrashParams {
+    /// Target device serial (uses first connected device if omitted)
+    pub device: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct StateParams {
+    /// Target device serial (uses first connected device if omitted)
+    pub device: Option<String>,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DeviceInfoParams {}
@@ -128,6 +145,7 @@ impl AbridgeMcp {
         &self,
         Parameters(params): Parameters<ScreenshotParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
+        crate::adb::set_target_device(params.device.clone());
         let png_data = crate::screen::capture_screenshot()
             .map_err(|e| crate::mcp::mcp_err(format!("Screenshot failed: {e}")))?;
 
@@ -205,6 +223,7 @@ impl AbridgeMcp {
         &self,
         Parameters(params): Parameters<LogcatParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
+        crate::adb::set_target_device(params.device.clone());
         let result = crate::logcat::fetch(
             params.app.as_deref(),
             params.tag.as_deref(),
@@ -220,7 +239,11 @@ impl AbridgeMcp {
     #[tool(
         description = "Get current device state: focused activity, fragment backstack, display info, and memory stats."
     )]
-    async fn device_state(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+    async fn device_state(
+        &self,
+        Parameters(params): Parameters<StateParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        crate::adb::set_target_device(params.device);
         let result = crate::state::get_state(true).map_err(crate::mcp::mcp_err)?;
         let json = serde_json::to_string_pretty(&result).map_err(crate::mcp::mcp_err)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
@@ -233,6 +256,7 @@ impl AbridgeMcp {
         &self,
         Parameters(params): Parameters<InputParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
+        crate::adb::set_target_device(params.device.clone());
         let message = match params.r#type.as_str() {
             "text" => {
                 crate::input::input_text(&params.value).map_err(crate::mcp::mcp_err)?;
@@ -301,8 +325,9 @@ impl AbridgeMcp {
     )]
     async fn device_crash_report(
         &self,
-        Parameters(_params): Parameters<CrashParams>,
+        Parameters(params): Parameters<CrashParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
+        crate::adb::set_target_device(params.device);
         let report = crate::state::get_crash_report(true).map_err(crate::mcp::mcp_err)?;
         let json = serde_json::to_string_pretty(&report).map_err(crate::mcp::mcp_err)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
@@ -315,6 +340,7 @@ impl AbridgeMcp {
         &self,
         Parameters(params): Parameters<ShellParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
+        crate::adb::set_target_device(params.device);
         let output = crate::adb::shell_str(&params.command).map_err(crate::mcp::mcp_err)?;
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }

@@ -21,6 +21,9 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // Set target device for all ADB commands (CLI-wide)
+    adb::set_target_device(cli.device);
+
     match cli.command {
         Command::Screen(args) => screen::run(args).await,
         Command::Log(args) => logcat::run(args).await,
