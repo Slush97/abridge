@@ -30,15 +30,48 @@ pub struct ScreenCapture {
     pub saved_to: Option<String>,
 }
 
-/// Take a screenshot from the device.
+/// Take a screenshot from the device as raw PNG data.
+///
+/// The device must be connected and accessible via ADB.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// let png = adbridge::screen::capture_screenshot()?;
+/// std::fs::write("screenshot.png", &png)?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn capture_screenshot() -> Result<Vec<u8>> {
     adb::shell("screencap -p").context("Failed to capture screenshot")
 }
 
-/// Dump the view hierarchy via uiautomator.
+/// Dump the view hierarchy via uiautomator as XML.
 ///
 /// Tries `/dev/tty` first (zero-copy, works on most devices). Falls back to
 /// dumping to a temp file and reading it back (required on Android 16+).
+///
+/// The returned XML can be processed with [`strip_hierarchy`] to reduce size
+/// or [`elements::parse_elements`] to extract interactive UI elements.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// let xml = adbridge::screen::dump_hierarchy()?;
+///
+/// // Reduce size for AI consumption
+/// let stripped = adbridge::screen::strip_hierarchy(&xml);
+///
+/// // Or extract interactive elements
+/// let elements = adbridge::screen::elements::parse_elements(&xml, true);
+/// for el in &elements {
+///     println!("{el}");
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub fn dump_hierarchy() -> Result<String> {
     let output = adb::shell_str("uiautomator dump /dev/tty 2>/dev/null")
         .context("Failed to dump view hierarchy")?;
@@ -62,7 +95,22 @@ pub fn dump_hierarchy() -> Result<String> {
     }
 }
 
-/// Compress a PNG screenshot to JPEG at reduced resolution for lower token usage.
+/// Compress a PNG screenshot to JPEG at reduced resolution.
+///
+/// Downscales the image to `max_width` (preserving aspect ratio) and encodes
+/// it as JPEG at the given `quality` (0-100). Useful for reducing token usage
+/// when sending screenshots to AI models.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// let png = adbridge::screen::capture_screenshot()?;
+/// let jpeg = adbridge::screen::compress_screenshot(&png, 720, 80)?;
+/// println!("PNG: {} bytes -> JPEG: {} bytes", png.len(), jpeg.len());
+/// # Ok(())
+/// # }
+/// ```
 pub fn compress_screenshot(png_data: &[u8], max_width: u32, quality: u8) -> Result<Vec<u8>> {
     let img = image::load_from_memory(png_data).context("Failed to decode screenshot")?;
 
@@ -82,6 +130,40 @@ pub fn compress_screenshot(png_data: &[u8], max_width: u32, quality: u8) -> Resu
 }
 
 /// Strip default/false attributes from uiautomator hierarchy XML to reduce size.
+///
+/// Removes attributes that carry no information: boolean attributes at their
+/// default values (`checkable="false"`, `enabled="true"`, etc.), empty string
+/// attributes (`text=""`, `content-desc=""`), and the `index` attribute.
+/// Typically reduces XML size by 50%+.
+///
+/// Non-`<node>` elements (like `<hierarchy>`) keep all their attributes.
+/// Returns the input unchanged if it cannot be parsed as XML.
+///
+/// # Examples
+///
+/// ```
+/// use adbridge::screen::strip_hierarchy;
+///
+/// let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+/// <hierarchy rotation="0">
+///   <node text="Login" class="android.widget.Button" clickable="true"
+///         checkable="false" enabled="true" bounds="[200,700][880,800]" />
+/// </hierarchy>"#;
+///
+/// let stripped = strip_hierarchy(xml);
+///
+/// // Default-value attributes are removed
+/// assert!(!stripped.contains("checkable="));
+/// assert!(!stripped.contains("enabled="));
+///
+/// // Non-default attributes are preserved
+/// assert!(stripped.contains(r#"text="Login""#));
+/// assert!(stripped.contains(r#"clickable="true""#));
+/// assert!(stripped.contains(r#"bounds="[200,700][880,800]""#));
+///
+/// // Always smaller than the original
+/// assert!(stripped.len() < xml.len());
+/// ```
 pub fn strip_hierarchy(xml: &str) -> String {
     let doc = match roxmltree::Document::parse(xml) {
         Ok(d) => d,
@@ -170,6 +252,25 @@ fn escape_xml_attr(s: &str) -> String {
 }
 
 /// Clean OCR output by removing lines that are mostly non-alphanumeric noise.
+///
+/// Tesseract often produces garbage characters when run against non-text areas
+/// of a screenshot (icons, gradients, wallpapers). This function filters out
+/// lines where less than 40% of characters are alphanumeric or whitespace.
+///
+/// # Examples
+///
+/// ```
+/// use adbridge::screen::clean_ocr_text;
+///
+/// let raw_ocr = "Settings\n!!@@##$$%%\nWi-Fi\n{{{|||}}}\nBluetooth";
+/// let cleaned = clean_ocr_text(raw_ocr);
+///
+/// assert!(cleaned.contains("Settings"));
+/// assert!(cleaned.contains("Wi-Fi"));
+/// assert!(cleaned.contains("Bluetooth"));
+/// assert!(!cleaned.contains("!!@@"));
+/// assert!(!cleaned.contains("{{{"));
+/// ```
 pub fn clean_ocr_text(text: &str) -> String {
     text.lines()
         .filter(|line| {
@@ -189,7 +290,22 @@ pub fn clean_ocr_text(text: &str) -> String {
         .join("\n")
 }
 
-/// Run OCR on a PNG image buffer using leptess.
+/// Run OCR on a PNG image buffer using Tesseract.
+///
+/// Writes the image to a temp file, runs Tesseract, and returns the extracted
+/// text. Requires Tesseract and tessdata to be installed on the system.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// let png = adbridge::screen::capture_screenshot()?;
+/// let text = adbridge::screen::ocr_image(&png)?;
+/// let clean = adbridge::screen::clean_ocr_text(&text);
+/// println!("{clean}");
+/// # Ok(())
+/// # }
+/// ```
 pub fn ocr_image(png_data: &[u8]) -> Result<String> {
     use leptess::LepTess;
     use std::io::Write;

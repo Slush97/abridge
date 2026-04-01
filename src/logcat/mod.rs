@@ -67,7 +67,26 @@ fn parse_logcat_line(line: &str) -> Option<LogEntry> {
     })
 }
 
-/// Fetch recent logcat entries with filtering.
+/// Fetch recent logcat entries with optional app, tag, and level filtering.
+///
+/// - `app`: Filter by package name (uses `pidof` to find the process)
+/// - `tag`: Filter by log tag (substring match)
+/// - `level`: Minimum log level (`"verbose"`, `"debug"`, `"info"`, `"warn"`, `"error"`, `"fatal"`)
+/// - `lines`: Number of recent lines to fetch
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// // Recent errors from a specific app
+/// let logs = adbridge::logcat::fetch(Some("com.example.app"), None, "error", 20)?;
+/// for entry in &logs.entries {
+///     println!("{} {}/{}: {}", entry.timestamp, entry.level, entry.tag, entry.message);
+/// }
+/// println!("Total: {} entries", logs.total);
+/// # Ok(())
+/// # }
+/// ```
 pub fn fetch(app: Option<&str>, tag: Option<&str>, level: &str, lines: u32) -> Result<LogOutput> {
     let level_filter = parse_level_filter(level);
 

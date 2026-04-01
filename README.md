@@ -17,16 +17,13 @@ adbridge runs as a **standalone CLI** or as an **MCP server** that exposes your 
 - Pull crash reports with full context
 
 ```
-                          ADB
- ┌──────────────┐   native protocol   ┌──────────────┐
- │   Android    │◄────────────────────►│  adbridge    │
- │   Device     │                      │   daemon     │
- └──────────────┘                      └──────┬───────┘
-                                              │
-                                       ┌──────┴───────┐
-                                       │              │
-                                     CLI          MCP Server
-                                  (human)        (AI tools)
+              ADB protocol
+ Android ◄──────────────────► adbridge
+ Device                          │
+                          ┌──────┴──────┐
+                          │             │
+                        CLI        MCP Server
+                      (human)     (AI tools)
 ```
 
 ## Install

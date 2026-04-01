@@ -2,9 +2,13 @@
 name = "adbridge"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
 description = "Android Bridge for AI-Assisted Development: CLI + MCP server"
 license = "MIT"
+authors = ["Slush97"]
 repository = "https://github.com/Slush97/adbridge"
+homepage = "https://github.com/Slush97/adbridge"
+documentation = "https://docs.rs/adbridge"
 readme = "README.md"
 keywords = ["android", "adb", "mcp", "ai", "debugging"]
 categories = ["command-line-utilities", "development-tools::debugging"]

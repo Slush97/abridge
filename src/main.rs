@@ -1,14 +1,8 @@
-mod adb;
-mod cli;
-mod input;
-mod logcat;
-mod mcp;
-mod screen;
-mod state;
-
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Command};
+
+use adbridge::cli::{Cli, Command};
+use adbridge::{adb, input, logcat, mcp, screen, state};
 
 #[tokio::main]
 async fn main() -> Result<()> {

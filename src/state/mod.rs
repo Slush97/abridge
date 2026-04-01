@@ -79,7 +79,23 @@ pub fn memory_info() -> Result<MemoryInfo> {
     })
 }
 
-/// Get full device state snapshot.
+/// Get a full device state snapshot.
+///
+/// Returns the current activity, resumed activities, fragment backstack,
+/// display info, and optionally memory statistics.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// let state = adbridge::state::get_state(true)?;
+/// println!("Activity: {}", state.current_activity);
+/// if let Some(mem) = &state.memory {
+///     println!("RAM: {}", mem.total_ram);
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub fn get_state(include_memory: bool) -> Result<DeviceState> {
     let memory = if include_memory {
         Some(memory_info()?)
@@ -96,7 +112,24 @@ pub fn get_state(include_memory: bool) -> Result<DeviceState> {
     })
 }
 
-/// Get recent crash info.
+/// Get the most recent crash report from the device.
+///
+/// Collects the crash log, current activity, recent error-level logcat entries,
+/// and optionally saves a screenshot to a temp file.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// let report = adbridge::state::get_crash_report(true)?;
+/// println!("Crash in: {}", report.current_activity);
+/// println!("{}", report.stacktrace);
+/// if let Some(path) = &report.screenshot_path {
+///     println!("Screenshot: {path}");
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub fn get_crash_report(include_screenshot: bool) -> Result<CrashReport> {
     let stacktrace = adb::shell_str("logcat -b crash -d -t 50")
         .unwrap_or_else(|_| "No crash log available".to_string());

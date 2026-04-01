@@ -1,6 +1,12 @@
 use std::fmt;
 
 /// A parsed UI element from the uiautomator view hierarchy.
+///
+/// Each element represents a node from the Android view tree with its
+/// properties, bounding box, and computed center coordinates (for tapping).
+///
+/// Use [`parse_elements`] to extract elements from hierarchy XML, and
+/// the [`Display`](std::fmt::Display) impl to render them as compact text.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct UiElement {
     pub index: u32,
@@ -108,9 +114,37 @@ fn short_resource_id(id: &str) -> String {
 
 /// Parse uiautomator XML into a flat list of UI elements.
 ///
-/// If `interactive_only` is true (the default), only elements that are clickable,
-/// focusable, scrollable, or checkable are included -- plus non-interactive elements
-/// that have visible text (as landmarks).
+/// If `interactive_only` is true, only elements that are clickable, focusable,
+/// scrollable, or checkable are included, plus non-interactive elements that
+/// have visible text or content descriptions (as landmarks for orientation).
+///
+/// Each element gets a sequential index (starting at 1) and pre-computed
+/// center coordinates for easy tapping.
+///
+/// # Examples
+///
+/// ```
+/// use adbridge::screen::elements::parse_elements;
+///
+/// let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+/// <hierarchy rotation="0">
+///   <node text="Login" resource-id="com.app:id/btn" class="android.widget.Button"
+///         clickable="true" focusable="true" bounds="[200,700][880,800]" />
+///   <node text="" resource-id="com.app:id/spacer" class="android.view.View"
+///         clickable="false" focusable="false" bounds="[0,800][1080,810]" />
+/// </hierarchy>"#;
+///
+/// // interactive_only filters out non-interactive, unlabeled elements
+/// let elements = parse_elements(xml, true);
+/// assert_eq!(elements.len(), 1);
+/// assert_eq!(elements[0].text, "Login");
+/// assert_eq!(elements[0].center, (540, 750));
+/// assert!(elements[0].clickable);
+///
+/// // All mode includes every element with valid bounds
+/// let all = parse_elements(xml, false);
+/// assert_eq!(all.len(), 2);
+/// ```
 pub fn parse_elements(xml: &str, interactive_only: bool) -> Vec<UiElement> {
     let doc = match roxmltree::Document::parse(xml) {
         Ok(d) => d,
@@ -173,7 +207,33 @@ pub fn parse_elements(xml: &str, interactive_only: bool) -> Vec<UiElement> {
     elements
 }
 
-/// Format a list of elements as a compact text listing.
+/// Format a list of elements as a compact, human-readable text listing.
+///
+/// Each element is printed on one line with its index, class, label, center
+/// coordinates, and any notable properties. Interactive elements show their
+/// class name directly; non-interactive landmarks have their class in brackets.
+///
+/// # Examples
+///
+/// ```
+/// use adbridge::screen::elements::{parse_elements, format_elements};
+///
+/// let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+/// <hierarchy rotation="0">
+///   <node text="Login" resource-id="com.app:id/btn" class="android.widget.Button"
+///         clickable="true" focusable="true" bounds="[200,700][880,800]" />
+///   <node text="Welcome" class="android.widget.TextView"
+///         clickable="false" focusable="false" bounds="[100,400][980,500]" />
+/// </hierarchy>"#;
+///
+/// let elements = parse_elements(xml, true);
+/// let output = format_elements(&elements);
+///
+/// // Interactive element shown directly
+/// assert!(output.contains(r#"Button "Login" (540, 750)"#));
+/// // Non-interactive landmark has class in brackets
+/// assert!(output.contains(r#"[TextView] "Welcome""#));
+/// ```
 pub fn format_elements(elements: &[UiElement]) -> String {
     elements
         .iter()

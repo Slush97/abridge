@@ -12,7 +12,19 @@ pub struct DeviceInfo {
     pub sdk_version: String,
 }
 
-/// List connected devices with basic info.
+/// List connected devices with model, Android version, and SDK version.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// let devices = adbridge::adb::connection::list_devices()?;
+/// for d in &devices {
+///     println!("{} - {} (Android {})", d.serial, d.model, d.android_version);
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub fn list_devices() -> Result<Vec<DeviceInfo>> {
     let mut server = ADBServer::default();
     let devices = server

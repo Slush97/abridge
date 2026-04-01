@@ -38,36 +38,98 @@ fn escape_for_input(text: &str) -> String {
 }
 
 /// Send text input to the device.
+///
+/// Special characters and shell metacharacters are automatically escaped.
+/// Spaces are sent as `%s` (the ADB input text convention).
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// adbridge::input::input_text("hello world")?;
+/// adbridge::input::input_text("user@example.com")?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn input_text(text: &str) -> Result<()> {
     let escaped = escape_for_input(text);
     adb::shell_str(&format!("input text {escaped}")).context("Failed to send text input")?;
     Ok(())
 }
 
-/// Send a tap at coordinates.
+/// Send a tap at the given screen coordinates.
+///
+/// Coordinates are in pixels, relative to the top-left corner of the screen.
+/// Use [`screen::elements::parse_elements`](crate::screen::elements::parse_elements)
+/// to get tap coordinates for UI elements.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// // Tap the center of a button
+/// adbridge::input::tap(540, 750)?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn tap(x: u32, y: u32) -> Result<()> {
     adb::shell_str(&format!("input tap {x} {y}")).context("Failed to send tap")?;
     Ok(())
 }
 
-/// Send a swipe gesture.
+/// Send a swipe gesture from `(x1, y1)` to `(x2, y2)` over `duration_ms` milliseconds.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// // Scroll down
+/// adbridge::input::swipe(540, 1500, 540, 500, 300)?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn swipe(x1: u32, y1: u32, x2: u32, y2: u32, duration_ms: u32) -> Result<()> {
     adb::shell_str(&format!("input swipe {x1} {y1} {x2} {y2} {duration_ms}"))
         .context("Failed to send swipe")?;
     Ok(())
 }
 
-/// Send a key event.
+/// Send a key event by name.
+///
+/// Supported keys: `home`, `back`, `enter`, `menu`, `power`, `volup`,
+/// `voldown`, `tab`, `delete`, `recent`, `camera`, `search`, `call`, `endcall`.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// adbridge::input::key("home")?;
+/// adbridge::input::key("back")?;
+/// adbridge::input::key("enter")?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn key(name: &str) -> Result<()> {
     let code = keycode_for(name)?;
     adb::shell_str(&format!("input keyevent {code}")).context("Failed to send key event")?;
     Ok(())
 }
 
-/// Push text to device clipboard via a broadcast.
+/// Push text to the device clipboard via a broadcast intent.
 ///
 /// Returns a status message indicating whether the broadcast was received.
-/// Requires the Clipper app (available on F-Droid) for reliable operation.
+/// Requires the [Clipper](https://f-droid.org/packages/ca.zgrs.clipper/) app
+/// for reliable operation.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> anyhow::Result<()> {
+/// let status = adbridge::input::set_clipboard("https://example.com")?;
+/// println!("{status}");
+/// # Ok(())
+/// # }
+/// ```
 pub fn set_clipboard(text: &str) -> Result<String> {
     let escaped = text.replace('\'', "'\\''");
     let output = adb::shell_str(&format!("am broadcast -a clipper.set -e text '{escaped}'"))

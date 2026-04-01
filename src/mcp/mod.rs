@@ -51,6 +51,12 @@ pub struct AbridgeMcp {
     tool_router: ToolRouter<Self>,
 }
 
+impl Default for AbridgeMcp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AbridgeMcp {
     pub fn new() -> Self {
         Self {
